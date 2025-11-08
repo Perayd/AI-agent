@@ -1,0 +1,54 @@
+npm init -y
+npm install ethers dotenv
+require('dotenv').config();
+const { ethers } = require("ethers");
+
+// Config from env
+const RPC = process.env.RPC_URL; // e.g. http://127.0.0.1:8545 or Infura/Alchemy endpoint for testnet
+const PRIVATE_KEY = process.env.AGENT_PRIVATE_KEY; // agent's key (signer)
+const EXECUTOR_PRIVATE_KEY = process.env.EXECUTOR_PRIVATE_KEY; // account paying tx gas
+const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS;
+const ABI = [ // minimal ABI for executeAction and nonces
+  "function executeAction(address agent,string actionType,string payload,uint256 nonce,uint256 expiry,bytes sig) external",
+  "function nonces(address) view returns (uint256)"
+];
+
+async function main() {
+  const provider = new ethers.providers.JsonRpcProvider(RPC);
+  const signer = new ethers.Wallet(EXECUTOR_PRIVATE_KEY, provider);
+  const agentWallet = new ethers.Wallet(PRIVATE_KEY, provider);
+
+  const contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, signer);
+
+  const agent = agentWallet.address;
+  const actionType = "signal";
+  const payload = JSON.stringify({ pair: "ETH/USDC", side: "buy", size: "0.1" });
+  const nonce = (await contract.nonces(agent)).toNumber();
+  const expiry = Math.floor(Date.now() / 1000) + 300; // 5 minutes
+
+  // Build the message hash to sign (must match smart contract)
+  const innerHash = ethers.utils.keccak256(ethers.utils.defaultAbiCoder.encode(
+    ["address","string","string","uint256","uint256"],
+    [agent, actionType, payload, nonce, expiry]
+  ));
+  const prefixed = ethers.utils.keccak256(ethers.utils.concat([
+    ethers.utils.toUtf8Bytes("\x19Ethereum Signed Message:\n32"),
+    ethers.utils.arrayify(innerHash)
+  ]));
+
+  // Sign with agent private key
+  const signature = await agentWallet.signMessage(ethers.utils.arrayify(innerHash));
+  // Note: signMessage adds the Ethereum prefix internally, so we sign innerHash bytes directly as done above.
+
+  // Submit to contract
+  const tx = await contract.executeAction(agent, actionType, payload, nonce, expiry, signature, { gasLimit: 200000 });
+  console.log("tx hash:", tx.hash);
+  await tx.wait();
+  console.log("executed");
+}
+
+main().catch(console.error);
+RPC_URL=http://127.0.0.1:8545
+AGENT_PRIVATE_KEY=0x...
+EXECUTOR_PRIVATE_KEY=0x...
+CONTRACT_ADDRESS=0x...
