@@ -1,0 +1,47 @@
+pip install eth_account requests
+import os, time, json
+from eth_account import Account
+from eth_account.messages import encode_defunct
+
+# Use your AI library here (OpenAI, local LLM). Replace below with real prompt->decision.
+def get_ai_decision(market_state):
+    # Example pseudo-logic
+    return {"actionType": "signal", "payload": {"pair":"ETH/USDC","side":"buy","size":"0.1"}}
+
+def main():
+    PRIVATE_KEY = os.environ['AGENT_PRIVATE_KEY']
+    acct = Account.from_key(PRIVATE_KEY)
+    agent = acct.address
+
+    # pretend we fetched market state
+    market_state = {}
+    decision = get_ai_decision(market_state)
+    actionType = decision["actionType"]
+    payload_str = json.dumps(decision["payload"])
+
+    # You must read current nonce from chain (e.g., via web3) - here we set a placeholder
+    nonce = int(os.environ.get("AGENT_NONCE", "0"))
+    expiry = int(time.time()) + 300
+
+    # Pack and hash - must match contract encoding
+    packed = agent + actionType + payload_str + str(nonce) + str(expiry) # Not real ABI encoding — DO NOT use this in prod
+    # Instead create proper ABI-encoded hash with eth_abi or web3
+
+    # For demonstration we'll sign a message object via eth_account
+    # Proper approach: use encode_defunct(primitive=keccak256(abi.encode...))
+    message_hash = encode_defunct(text=json.dumps({
+        "agent": agent,
+        "actionType": actionType,
+        "payload": payload_str,
+        "nonce": nonce,
+        "expiry": expiry
+    }))
+    signed = Account.sign_message(message_hash, PRIVATE_KEY)
+    signature = signed.signature.hex()
+    print("agent:", agent)
+    print("signature:", signature)
+    print("payload:", payload_str)
+    # send signature+payload to executor or to your Node.js submitter
+
+if __name__ == "__main__":
+    main()
